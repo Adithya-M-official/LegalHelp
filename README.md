@@ -1,5 +1,5 @@
 # LegalHelp
-An app made fully in python that can help even the illiterate with reading legal reports and the summarisation and audio-output of the summary and points it sees.
+LegalHelp is a Python application that helps users understand legal documents by extracting text, generating simple-language summaries, and providing audio output in the user's preferred language.
 
 # Tech Stack
 It uses python only. It uses these following modules.
@@ -8,7 +8,8 @@ It uses python only. It uses these following modules.
 - numpy
 
 # Description
-Ileterate people that cannot read any legal documents, or those that do not have much time on their hands to shuffle through their legal documents, face the common issue of not being able to read these documents. Thus LegalHelp works to alleviate this issue, but doing a few things in particular.
+People with limited literacy - those who are unable to read and write, and those who may not have enough time to spend in their schedule, often end up not being able to read through possibly important legal documents. 
+This is where LegalHelp comes in. LegalHelp works like so:
 
 1. It takes in photographic input of the legal documents, and an audio query from the user. These are then parsed and sent to an LLM which can process these into a structured output, based on a static prompt given, and the information given by the user.
 
