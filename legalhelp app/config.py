@@ -37,6 +37,21 @@ RETRY_BACKOFF_SECONDS = 1.5
 # language code (e.g. an unusual regional variant).
 DEFAULT_TTS_LANGUAGE = "en"
 
+# gTTS accepts specific language/region codes and will raise ValueError
+# for codes it doesn't recognize (e.g. some regional or less-common ISO
+# 639-1 codes Gemini might return). This maps a few common cases Gemini
+# is likely to emit to a gTTS-supported equivalent, checked before
+# falling back to DEFAULT_TTS_LANGUAGE. Not exhaustive by design -- the
+# runtime fallback in ai_logic.py already handles anything not listed
+# here, so this table only needs to cover the common, known mismatches.
+TTS_LANGUAGE_ALIASES = {
+    "zh-cn": "zh-CN",
+    "zh-tw": "zh-TW",
+    "zh": "zh-CN",
+    "iw": "he",  # old ISO code for Hebrew, still sometimes emitted
+    "jv": "jw",  # Javanese, gTTS uses the older "jw" code
+}
+
 # --------------------------------------------------------------------------
 # Upload defaults and limits
 # --------------------------------------------------------------------------
@@ -58,3 +73,31 @@ MAX_AUDIO_SIZE_MB = 15
 # Maximum characters accepted for a typed question, to avoid accidental
 # huge pastes being sent to the model.
 MAX_QUESTION_LENGTH = 1000
+
+# --------------------------------------------------------------------------
+# Multi-page document settings
+# --------------------------------------------------------------------------
+
+# Maximum number of page images accepted in a single analysis request.
+# See document_pages.py for how pages are validated and sent to Gemini.
+MAX_PAGES = 10
+
+# --------------------------------------------------------------------------
+# Image quality check settings
+# --------------------------------------------------------------------------
+
+# When True, images that trigger quality warnings (blur, glare, low
+# resolution, too dark) are still sent to Gemini -- the user just sees
+# a warning first and can choose to proceed or re-upload. Set to False
+# to hard-block low-quality images instead.
+ALLOW_ANALYSIS_WITH_QUALITY_WARNINGS = True
+
+# --------------------------------------------------------------------------
+# Logging
+# --------------------------------------------------------------------------
+
+# Standard library logging level for the whole app. Streamlit doesn't
+# configure logging by default, so app.py sets this up at startup.
+# Set via the LOG_LEVEL environment variable in production if a
+# different verbosity is needed (e.g. "DEBUG" while diagnosing an issue).
+LOG_LEVEL = "INFO"

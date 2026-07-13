@@ -5,7 +5,8 @@ All AI-related logic for LegalHelp.
 
 This module is responsible for:
     - Initializing the Gemini client.
-    - Building the multimodal request (image + text/audio).
+    - Building the multimodal request (one or more page images +
+      text/audio).
     - Sending the request to Gemini (with retries) and parsing its
       structured response.
     - Converting the response text into speech using gTTS.
@@ -19,30 +20,51 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 from dataclasses import dataclass
 from io import BytesIO
-from typing import Optional
+from typing import List, Optional, Tuple
 
 import streamlit as st
 from google import genai
 from google.genai import types
 from google.genai.errors import APIError
 from gtts import gTTS
+from gtts.lang import tts_langs
 
 from config import (
     DEFAULT_TTS_LANGUAGE,
     MAX_API_RETRIES,
     MODEL_NAME,
     RETRY_BACKOFF_SECONDS,
+    TTS_LANGUAGE_ALIASES,
 )
 from prompts import SYSTEM_PROMPT
 
-# Module-level logger. Streamlit doesn't configure logging by default, so
-# this gives developers visibility into API failures/retries in the
-# terminal running `streamlit run app.py`, without printing anything to
-# the user-facing UI.
+# Module-level logger. app.py configures logging handlers/format at
+# startup; this module just emits records through the standard
+# hierarchy so they show up in the terminal running `streamlit run app.py`
+# without printing anything to the user-facing UI.
 logger = logging.getLogger(__name__)
+
+# Matches a fenced code block, optionally tagged with a language (e.g.
+# ```json ... ```), capturing the inner content. Used as a more robust
+# fallback than a plain strip() when Gemini wraps JSON in markdown despite
+# being told not to.
+_FENCE_PATTERN = re.compile(r"```(?:[a-zA-Z0-9]*\n)?(.*?)```", re.DOTALL)
+
+# ISO 639-1 codes that gTTS actually supports, fetched once per process.
+# Wrapped defensively since tts_langs() makes a network call the first
+# time it's used in some gTTS versions and could fail offline.
+try:
+    _SUPPORTED_TTS_LANGUAGES = set(tts_langs().keys())
+except Exception:  # noqa: BLE001
+    logger.warning(
+        "Could not load gTTS supported-language list; language validation "
+        "will rely solely on runtime fallback."
+    )
+    _SUPPORTED_TTS_LANGUAGES = set()
 
 
 # --------------------------------------------------------------------------
@@ -77,6 +99,7 @@ def _get_client() -> genai.Client:
         api_key = None
 
     if not api_key:
+        logger.error("GEMINI_API_KEY is missing from Streamlit secrets.")
         raise RuntimeError(
             "GEMINI_API_KEY is missing from Streamlit secrets. "
             "Add it to .streamlit/secrets.toml before running the app."
@@ -89,8 +112,7 @@ def _get_client() -> genai.Client:
 # --------------------------------------------------------------------------
 
 def _build_contents(
-    image_bytes: bytes,
-    mime_type: str,
+    page_images: List[Tuple[bytes, str]],
     text_question: Optional[str],
     audio_bytes: Optional[bytes],
     audio_mime_type: Optional[str],
@@ -99,20 +121,29 @@ def _build_contents(
     Build the multimodal `contents` list sent to Gemini.
 
     Exactly one of `text_question` or `audio_bytes` is included, matching
-    the "one input method" rule enforced in the UI layer.
+    the "one input method" rule enforced in the UI layer. One or more
+    page images are always included, in order, as separate parts so
+    Gemini can read a multi-page document as a single coherent whole.
 
     Args:
-        image_bytes: Raw bytes of the uploaded legal document image.
-        mime_type: MIME type of the image (e.g. "image/png").
+        page_images: Ordered list of (image_bytes, mime_type) tuples,
+            one per document page. Must contain at least one entry.
         text_question: The user's typed question, if provided.
         audio_bytes: Raw bytes of the user's recorded question, if provided.
         audio_mime_type: MIME type of the recorded audio, if provided.
 
     Returns:
         list: A list of Content objects ready to send to Gemini.
+
+    Raises:
+        ValueError: If `page_images` is empty.
     """
+    if not page_images:
+        raise ValueError("At least one page image is required.")
+
     parts = [
-        types.Part.from_bytes(data=image_bytes, mime_type=mime_type),
+        types.Part.from_bytes(data=image_bytes, mime_type=mime_type)
+        for image_bytes, mime_type in page_images
     ]
 
     if text_question:
@@ -122,6 +153,12 @@ def _build_contents(
             types.Part.from_bytes(data=audio_bytes, mime_type=audio_mime_type)
         )
 
+    logger.info(
+        "Built Gemini request with %d page image(s) and %s input.",
+        len(page_images),
+        "text" if text_question else "audio",
+    )
+
     return [types.Content(role="user", parts=parts)]
 
 
@@ -129,8 +166,9 @@ def _parse_gemini_response(raw_text: str) -> tuple[str, str]:
     """
     Parse Gemini's JSON response into (response_text, language_code).
 
-    Falls back gracefully if Gemini wraps the JSON in markdown fences or
-    adds stray whitespace, despite being instructed not to.
+    Falls back gracefully if Gemini wraps the JSON in markdown fences,
+    adds stray whitespace/preamble text, or uses smart quotes, despite
+    being instructed not to.
 
     Args:
         raw_text: The raw text returned by Gemini.
@@ -143,21 +181,48 @@ def _parse_gemini_response(raw_text: str) -> tuple[str, str]:
             missing/blank required fields.
     """
     if not raw_text or not raw_text.strip():
+        logger.error("Gemini returned an empty response body.")
         raise ValueError("Gemini returned an empty response.")
 
     cleaned = raw_text.strip()
 
-    if cleaned.startswith("```"):
-        cleaned = cleaned.strip("`")
-        if cleaned.lower().startswith("json"):
-            cleaned = cleaned[4:]
-        cleaned = cleaned.strip()
+    def _try_parse(candidate: str) -> Optional[dict]:
+        try:
+            return json.loads(candidate)
+        except json.JSONDecodeError:
+            return None
+
+    data = _try_parse(cleaned)
+
+    if data is None:
+        # Fallback 1: pull content out of a ```...``` fenced block,
+        # wherever it appears in the response.
+        fence_match = _FENCE_PATTERN.search(cleaned)
+        if fence_match:
+            data = _try_parse(fence_match.group(1).strip())
+
+    if data is None:
+        # Fallback 2: the response may have stray preamble/postamble
+        # text around the JSON object itself (e.g. "Here's the answer:
+        # {...}"). Extract the outermost {...} span and try that.
+        start = cleaned.find("{")
+        end = cleaned.rfind("}")
+        if start != -1 and end != -1 and end > start:
+            data = _try_parse(cleaned[start : end + 1])
+
+    if data is None:
+        logger.error(
+            "Failed to parse Gemini response as JSON after all fallbacks. "
+            "Raw response (truncated): %.200s",
+            cleaned,
+        )
+        raise ValueError("Gemini did not return the expected JSON structure.")
 
     try:
-        data = json.loads(cleaned)
         response_text = data["response"]
         language_code = data["language"]
-    except (json.JSONDecodeError, KeyError, TypeError) as exc:
+    except (KeyError, TypeError) as exc:
+        logger.error("Parsed JSON missing required fields: %s", data)
         raise ValueError(
             "Gemini did not return the expected JSON structure."
         ) from exc
@@ -174,6 +239,35 @@ def _parse_gemini_response(raw_text: str) -> tuple[str, str]:
 # Text-to-speech
 # --------------------------------------------------------------------------
 
+def _resolve_tts_language(language_code: str) -> str:
+    """
+    Map a Gemini-provided language code to one gTTS will accept.
+
+    Checks, in order: an explicit alias table for known mismatches,
+    then gTTS's own supported-language set, then falls back to the
+    configured default. This runs *before* calling gTTS so the common
+    cases are resolved without relying on catching a ValueError.
+
+    Args:
+        language_code: Lowercased ISO 639-1 (or similar) code from Gemini.
+
+    Returns:
+        str: A language code gTTS is expected to accept.
+    """
+    if language_code in TTS_LANGUAGE_ALIASES:
+        return TTS_LANGUAGE_ALIASES[language_code]
+
+    if _SUPPORTED_TTS_LANGUAGES and language_code not in _SUPPORTED_TTS_LANGUAGES:
+        logger.info(
+            "Language '%s' not in gTTS supported set; falling back to '%s'.",
+            language_code,
+            DEFAULT_TTS_LANGUAGE,
+        )
+        return DEFAULT_TTS_LANGUAGE
+
+    return language_code
+
+
 def _text_to_speech(text: str, language_code: str) -> BytesIO:
     """
     Convert text into spoken audio using gTTS, entirely in memory.
@@ -185,14 +279,18 @@ def _text_to_speech(text: str, language_code: str) -> BytesIO:
     Returns:
         BytesIO: An in-memory MP3 audio stream, positioned at the start.
     """
+    resolved_language = _resolve_tts_language(language_code)
+
     try:
-        tts = gTTS(text=text, lang=language_code)
+        tts = gTTS(text=text, lang=resolved_language)
     except ValueError:
-        # gTTS didn't recognize the code (e.g. an unusual regional
-        # variant) — fall back to the default language rather than
-        # failing outright.
-        logger.info(
-            "gTTS did not recognize language '%s'; falling back to '%s'.",
+        # Belt-and-braces: even after alias/support-set resolution,
+        # gTTS didn't recognize the code -- fall back to the default
+        # language rather than failing the whole request.
+        logger.warning(
+            "gTTS rejected language '%s' (resolved from '%s'); falling back "
+            "to '%s'.",
+            resolved_language,
             language_code,
             DEFAULT_TTS_LANGUAGE,
         )
@@ -231,7 +329,7 @@ def _call_gemini_with_retry(client: genai.Client, contents: list):
 
     for attempt in range(1, MAX_API_RETRIES + 2):  # +1 initial +1 for range
         try:
-            return client.models.generate_content(
+            response = client.models.generate_content(
                 model=MODEL_NAME,
                 contents=contents,
                 config=types.GenerateContentConfig(
@@ -239,6 +337,9 @@ def _call_gemini_with_retry(client: genai.Client, contents: list):
                     response_mime_type="application/json",
                 ),
             )
+            if attempt > 1:
+                logger.info("Gemini call succeeded on attempt %d.", attempt)
+            return response
         except APIError as exc:
             last_error = exc
             logger.warning(
@@ -250,6 +351,7 @@ def _call_gemini_with_retry(client: genai.Client, contents: list):
             if attempt <= MAX_API_RETRIES:
                 time.sleep(RETRY_BACKOFF_SECONDS)
 
+    logger.error("Gemini API call failed after all retry attempts.")
     raise RuntimeError(
         "Could not reach the Gemini API after several attempts. "
         "Please check your connection and try again."
@@ -261,22 +363,21 @@ def _call_gemini_with_retry(client: genai.Client, contents: list):
 # --------------------------------------------------------------------------
 
 def analyze_document(
-    image_bytes: bytes,
-    mime_type: str,
+    page_images: List[Tuple[bytes, str]],
     text_question: Optional[str] = None,
     audio_bytes: Optional[bytes] = None,
     audio_mime_type: Optional[str] = None,
 ) -> LegalHelpResult:
     """
-    Send a legal document image and a question (text or audio) to Gemini,
-    then convert the answer into speech.
+    Send one or more legal document page images and a question (text or
+    audio) to Gemini, then convert the answer into speech.
 
     Exactly one of `text_question` or `audio_bytes` should be provided;
     if both are given, text takes priority.
 
     Args:
-        image_bytes: Raw bytes of the uploaded legal document image.
-        mime_type: MIME type of the image.
+        page_images: Ordered list of (image_bytes, mime_type) tuples for
+            each page of the document. Must contain at least one entry.
         text_question: The user's typed question, if any.
         audio_bytes: The user's recorded question, if any.
         audio_mime_type: MIME type of the recorded audio, if any.
@@ -288,13 +389,13 @@ def analyze_document(
     Raises:
         RuntimeError: If the Gemini client cannot be created, or the API
             call fails after retries.
-        ValueError: If Gemini's response cannot be parsed.
+        ValueError: If `page_images` is empty or Gemini's response
+            cannot be parsed.
     """
     client = _get_client()
 
     contents = _build_contents(
-        image_bytes=image_bytes,
-        mime_type=mime_type,
+        page_images=page_images,
         text_question=text_question,
         audio_bytes=audio_bytes,
         audio_mime_type=audio_mime_type,
@@ -304,6 +405,14 @@ def analyze_document(
 
     response_text, language_code = _parse_gemini_response(response.text)
     audio_bytes_out = _text_to_speech(response_text, language_code)
+
+    logger.info(
+        "Analysis complete: %d page(s), detected language '%s', "
+        "explanation length %d chars.",
+        len(page_images),
+        language_code,
+        len(response_text),
+    )
 
     return LegalHelpResult(
         response_text=response_text,
