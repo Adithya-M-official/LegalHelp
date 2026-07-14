@@ -1,0 +1,51 @@
+<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
+<head><meta charset="utf-8"><title>free-cookies-policy-template</title>
+<style>body{font-family:'Times New Roman',serif;font-size:12pt;line-height:1.6;color:#1a1a1a}h2{font-size:16pt;font-weight:bold;margin-top:18pt;margin-bottom:6pt;color:#1a365d;border-bottom:1pt solid #ccc;padding-bottom:4pt}h3{font-size:13pt;font-weight:bold;margin-top:14pt;margin-bottom:4pt}p{margin-bottom:6pt}.template-highlight,.template-filled{background:#fefce8;border:1px solid #e5e7eb;padding:1px 4px}</style></head>
+<body><h2>Cookies Policy</h2>
+
+<p><strong><span class="template-filled">Acme Ltd</span></strong></p>
+<p><strong>Website: <span class="template-filled">www.acmeprivates.com</span></strong></p>
+
+<h3>1. About cookies</h3>
+<p>1.1 A cookie is a file containing an identifier (a string of letters and numbers) that is sent by a web server to a web browser and is stored by the browser. The identifier is then sent back to the server each time the browser requests a page from the server.</p>
+<p>1.2 Cookies may be either “persistent” cookies or “session” cookies: a persistent cookie will be stored by a web browser and will remain valid until its set expiry date, unless deleted by the user before the expiry date; a session cookie, on the other hand, will expire at the end of the user session, when the web browser is closed.</p>
+<p>1.3 Cookies may not contain any information that personally identifies a user, but personal data that we store about you may be linked to the information stored in and obtained from cookies.</p>
+
+<h3>2. Cookies that we use</h3>
+<p>2.1 We use cookies for the following purposes:</p>
+<p>(a) <span class="template-highlight">[authentication and status - we use cookies to identify you when you visit our website and as you navigate our website, and to help us determine if you are logged into our website]</span>;</p>
+<p>(b) <span class="template-highlight">[shopping cart - we use cookies to maintain the state of your shopping cart as you navigate our website]</span>;</p>
+<p>(c) <span class="template-highlight">[personalisation - we use cookies to store information about your preferences and to personalise our website for you]</span>;</p>
+<p>(d) <span class="template-highlight">[security - we use cookies as an element of the security measures used to protect user accounts, including preventing fraudulent use of login credentials, and to protect our website and services generally]</span>;</p>
+<p>(e) <span class="template-highlight">[advertising - we use cookies to help us to display advertisements that will be relevant to you]</span>;</p>
+<p>(f) <span class="template-highlight">[analysis - we use cookies to help us to analyse the use and performance of our website and services]</span>;</p>
+<p>(g) <span class="template-highlight">[cookie consent - we use cookies to store your preferences in relation to the use of cookies more generally]</span>.</p>
+
+<h3>3. Cookies used by our service providers</h3>
+<p>3.1 Our service providers use cookies and those cookies may be stored on your computer when you visit our website.</p>
+<p>3.2 We use <span class="template-highlight">[Google Analytics]</span>. Google Analytics gathers information about the use of our website by means of cookies. The information gathered is used to create reports about the use of our website. You can find out more about Google’s use of information by visiting https://policies.google.com/privacy and you can review Google’s privacy policy at https://policies.google.com/privacy.</p>
+<p>3.3 <span class="template-highlight">[We use [identify service provider]</span> to <span class="template-highlight">[specify service]</span>. This service uses cookies for <span class="template-highlight">[specify purpose(s)]</span>. You can view the privacy policy of this service provider at <span class="template-highlight">[URL]</span>.]</p>
+
+<h3>4. Managing cookies</h3>
+<p>4.1 Most browsers allow you to refuse to accept cookies and to delete cookies. The methods for doing so vary from browser to browser, and from version to version. You can however obtain up-to-date information about blocking and deleting cookies via these links:</p>
+<p>(a) https://support.google.com/chrome/answer/95647 (Chrome);</p>
+<p>(b) https://support.mozilla.org/en-US/kb/enhanced-tracking-protection-firefox-desktop (Firefox);</p>
+<p>(c) https://help.opera.com/en/latest/web-preferences/ (Opera);</p>
+<p>(d) https://support.apple.com/en-gb/guide/safari/sfri11471/mac (Safari);</p>
+<p>(e) https://support.microsoft.com/en-gb/help/4468242/microsoft-edge-browsing-data-and-privacy (Edge).</p>
+<p>4.2 Blocking all cookies will have a negative impact upon the usability of many websites.</p>
+<p>4.3 If you block cookies, you will not be able to use all the features on our website.</p>
+
+<h3>5. Cookie preferences</h3>
+<p>5.1 You can manage your preferences relating to the use of cookies on our website by visiting: <span class="template-highlight">[URL]</span>.</p>
+
+<h3>6. Amendments</h3>
+<p>6.1 We may update this policy from time to time by publishing a new version on our website.</p>
+<p>6.2 You should check this page occasionally to ensure you are happy with any changes to this policy.</p>
+
+<h3>7. Our details</h3>
+<p>7.1 This website is owned and operated by <span class="template-filled">Acme Ltd</span>.</p>
+<p>7.2 You can contact us by email at <span class="template-highlight">[email address]</span>.</p>
+
+<hr>
+<p style="font-size:0.85em;color:#718096;">This document was created using a free template from <a href="https://seqlegal.com" style="color:#2a4a7f;">SEQ Legal</a>.</p></body></html>

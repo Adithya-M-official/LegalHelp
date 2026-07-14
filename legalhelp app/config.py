@@ -56,19 +56,28 @@ TTS_LANGUAGE_ALIASES = {
 # Upload defaults and limits
 # --------------------------------------------------------------------------
 
-# Accepted image file types for the document uploader.
+# Accepted image file types for the document uploader. PDFs are also
+# accepted (see ALLOWED_DOCUMENT_TYPES) and are rasterized to page
+# images before entering this same pipeline -- see pdf_input.py.
 ALLOWED_IMAGE_TYPES = ["png", "jpg", "jpeg"]
+
+# Full set of file types accepted by the uploader widget, including PDF.
+ALLOWED_DOCUMENT_TYPES = ALLOWED_IMAGE_TYPES + ["pdf"]
 
 # MIME type fallbacks used if Streamlit can't determine one from the
 # uploaded file itself.
 DEFAULT_IMAGE_MIME_TYPE = "image/png"
 DEFAULT_AUDIO_MIME_TYPE = "audio/wav"
+PDF_MIME_TYPE = "application/pdf"
 
 # Maximum accepted upload sizes, in megabytes. Gemini's API and most
 # browsers already impose their own ceilings, but checking early gives
 # users a clear, fast error instead of a slow failure downstream.
 MAX_IMAGE_SIZE_MB = 10
 MAX_AUDIO_SIZE_MB = 15
+
+# Maximum accepted PDF size, in megabytes, checked before rasterization.
+MAX_PDF_SIZE_MB = 20
 
 # Maximum characters accepted for a typed question, to avoid accidental
 # huge pastes being sent to the model.

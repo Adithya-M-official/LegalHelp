@@ -17,7 +17,7 @@ from PIL import UnidentifiedImageError
 
 from ai_logic import analyze_document
 from config import (
-    ALLOWED_IMAGE_TYPES,
+    ALLOWED_DOCUMENT_TYPES,
     ALLOW_ANALYSIS_WITH_QUALITY_WARNINGS,
     APP_ICON,
     APP_NAME,
@@ -27,10 +27,12 @@ from config import (
     MAX_AUDIO_SIZE_MB,
     MAX_IMAGE_SIZE_MB,
     MAX_PAGES,
+    MAX_PDF_SIZE_MB,
     MAX_QUESTION_LENGTH,
 )
 from document_pages import validate_pages
 from export import build_explanation_pdf
+from pdf_input import is_pdf
 
 # --------------------------------------------------------------------------
 # Logging setup
@@ -55,9 +57,9 @@ st.set_page_config(page_title=APP_NAME, page_icon=APP_ICON)
 
 st.title(f"{APP_ICON} {APP_NAME}")
 st.write(
-    "Upload one or more photos of a legal document, then ask a question "
-    "by typing or recording your voice. LegalHelp will explain it in "
-    "plain language."
+    "Upload one or more photos of a legal document, or a PDF, then ask "
+    "a question by typing or recording your voice. LegalHelp will "
+    "explain it in plain language."
 )
 
 st.info(
@@ -74,38 +76,45 @@ st.info(
 # --------------------------------------------------------------------------
 
 uploaded_images = st.file_uploader(
-    "Upload a legal document (image)",
-    type=ALLOWED_IMAGE_TYPES,
+    "Upload a legal document (image or PDF)",
+    type=ALLOWED_DOCUMENT_TYPES,
     accept_multiple_files=True,
     help=(
-        f"Accepted formats: {', '.join(ALLOWED_IMAGE_TYPES).upper()}. "
-        f"Max size per file: {MAX_IMAGE_SIZE_MB} MB. "
-        f"Up to {MAX_PAGES} pages — upload multiple images if your "
-        "document has more than one page, in reading order."
+        f"Accepted formats: {', '.join(ALLOWED_DOCUMENT_TYPES).upper()}. "
+        f"Max size per image: {MAX_IMAGE_SIZE_MB} MB, per PDF: "
+        f"{MAX_PDF_SIZE_MB} MB. Up to {MAX_PAGES} pages — upload "
+        "multiple images (or a single multi-page PDF) if your document "
+        "has more than one page, in reading order."
     ),
 )
 
 if uploaded_images:
     if len(uploaded_images) > MAX_PAGES:
         st.warning(
-            f"You uploaded {len(uploaded_images)} images, but only the "
-            f"first {MAX_PAGES} will be analyzed. Consider splitting "
-            "very long documents into separate requests."
+            f"You uploaded {len(uploaded_images)} files, but only the "
+            f"first {MAX_PAGES} pages will be analyzed. Consider "
+            "splitting very long documents into separate requests."
         )
     # Preview so the user can confirm the right files were uploaded, in
     # the order they'll be sent. Descriptive captions double as alt text
-    # for screen readers.
+    # for screen readers. PDFs can't be previewed inline as an image
+    # here (they're only rasterized during analysis), so they get a
+    # simple file-name placeholder instead.
     preview_images = uploaded_images[:MAX_PAGES]
     columns = st.columns(min(len(preview_images), 4)) if preview_images else []
-    for position, (column, image_file) in enumerate(
+    for position, (column, doc_file) in enumerate(
         zip(columns * (len(preview_images) // max(len(columns), 1) + 1), preview_images)
     ):
         with column:
-            st.image(
-                image_file,
-                caption=f"Page {position + 1}: {image_file.name}",
-                use_container_width=True,
-            )
+            if is_pdf(doc_file.type or "", doc_file.name):
+                st.markdown(f"📄 **{doc_file.name}**")
+                st.caption("PDF — pages will be extracted during analysis.")
+            else:
+                st.image(
+                    doc_file,
+                    caption=f"Page {position + 1}: {doc_file.name}",
+                    use_container_width=True,
+                )
 
 typed_question = st.text_input(
     "Type your question (optional)",
@@ -133,10 +142,19 @@ def _validate_basic_input() -> Optional[str]:
         or None if the input is ready for per-page validation.
     """
     if not uploaded_images:
-        return "Please upload at least one image of your legal document."
+        return "Please upload at least one image or PDF of your legal document."
 
     if not typed_question and recorded_audio is None:
         return "Please type a question or record one before analyzing."
+
+    for doc_file in uploaded_images[:MAX_PAGES]:
+        if is_pdf(doc_file.type or "", doc_file.name):
+            pdf_size_mb = len(doc_file.getvalue()) / (1024 * 1024)
+            if pdf_size_mb > MAX_PDF_SIZE_MB:
+                return (
+                    f"'{doc_file.name}' is larger than the {MAX_PDF_SIZE_MB} MB "
+                    "PDF size limit. Please upload a smaller file."
+                )
 
     if recorded_audio is not None and not typed_question:
         audio_size_mb = len(recorded_audio.getvalue()) / (1024 * 1024)
@@ -266,9 +284,9 @@ if analyze_clicked:
                     except UnidentifiedImageError:
                         logger.exception("Uploaded file failed image validation.")
                         st.error(
-                            "That file doesn't look like a valid image. "
-                            "Please upload a clear PNG or JPG photo of "
-                            "your document."
+                            "That file doesn't look like a valid image or "
+                            "PDF. Please upload a clear PNG/JPG photo or a "
+                            "readable PDF of your document."
                         )
                     except RuntimeError as config_error:
                         logger.exception("Configuration or connectivity error.")
