@@ -3,10 +3,12 @@ app.py
 
 Streamlit UI for LegalHelp.
 
-This module handles ONLY user interaction: file uploads, audio
-recording, input validation, displaying results, and calling into
-ai_logic.py for all AI processing. No Gemini calls, prompt engineering,
-or speech generation happen here -- see ai_logic.py for that.
+This module handles user interaction: account authentication, file
+uploads, audio recording, input validation, displaying results, and
+calling into ai_logic.py for all AI processing. No Gemini calls, prompt
+engineering, or speech generation happen here -- see ai_logic.py for
+that. No password hashing or session logic happens here -- see auth.py.
+No direct SQL happens here -- see storage.py.
 """
 
 import logging
@@ -15,6 +17,8 @@ from typing import List, Optional
 import streamlit as st
 from PIL import UnidentifiedImageError
 
+import auth
+import storage
 from ai_logic import analyze_document
 from config import (
     ALLOWED_DOCUMENT_TYPES,
@@ -25,6 +29,7 @@ from config import (
     DEFAULT_IMAGE_MIME_TYPE,
     LOG_LEVEL,
     MAX_AUDIO_SIZE_MB,
+    MAX_HISTORY_ITEMS_DISPLAYED,
     MAX_IMAGE_SIZE_MB,
     MAX_PAGES,
     MAX_PDF_SIZE_MB,
@@ -49,6 +54,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Database schema is created (if missing) once per process start.
+storage.init_db()
+
 # --------------------------------------------------------------------------
 # Page setup
 # --------------------------------------------------------------------------
@@ -65,7 +73,195 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+
+# --------------------------------------------------------------------------
+# Authentication gate
+# --------------------------------------------------------------------------
+# Nothing below this block runs until a confirmed account is logged in.
+# Signup, login, account confirmation, and switching between previously
+# -used accounts (within this browser session) all happen here.
+
+def _render_login_form() -> None:
+    login_tab, signup_tab, confirm_tab = st.tabs(
+        ["Log in", "Create account", "Confirm account"]
+    )
+
+    with login_tab:
+        with st.form("login_form"):
+            email = st.text_input("Email", key="login_email")
+            password = st.text_input("Password", type="password", key="login_password")
+            submitted = st.form_submit_button("Log in", type="primary")
+        if submitted:
+            success, message = auth.log_in(email, password)
+            if success:
+                st.success(message)
+                st.rerun()
+            else:
+                st.error(message)
+
+    with signup_tab:
+        with st.form("signup_form"):
+            new_display_name = st.text_input("Display name", key="signup_name")
+            new_email = st.text_input("Email", key="signup_email")
+            new_password = st.text_input(
+                "Password", type="password", key="signup_password"
+            )
+            new_password_confirm = st.text_input(
+                "Confirm password", type="password", key="signup_password_confirm"
+            )
+            submitted = st.form_submit_button("Create account", type="primary")
+        if submitted:
+            success, message, token = auth.sign_up(
+                new_email, new_display_name, new_password, new_password_confirm
+            )
+            if success:
+                st.success(message)
+                st.info(
+                    "**Demo confirmation step:** this project has no email "
+                    "server configured, so instead of emailing you a "
+                    "confirmation link, here is your confirmation code. "
+                    "Copy it into the **Confirm account** tab to activate "
+                    f"your account:\n\n`{token}`"
+                )
+            else:
+                st.error(message)
+
+    with confirm_tab:
+        st.caption(
+            "Enter the confirmation code shown after signup to activate "
+            "your account."
+        )
+        with st.form("confirm_form"):
+            confirm_code = st.text_input("Confirmation code", key="confirm_code")
+            confirm_submitted = st.form_submit_button("Confirm account")
+        if confirm_submitted:
+            success, message = auth.confirm_account(confirm_code)
+            if success:
+                st.success(message)
+            else:
+                st.error(message)
+
+        st.divider()
+        st.caption("Didn't get a code, or it expired? Request a new one.")
+        with st.form("resend_form"):
+            resend_email = st.text_input("Account email", key="resend_email")
+            resend_submitted = st.form_submit_button("Resend confirmation code")
+        if resend_submitted:
+            success, message, token = auth.resend_confirmation_token(resend_email)
+            if success:
+                st.success(message)
+                st.info(f"New confirmation code:\n\n`{token}`")
+            else:
+                st.warning(message)
+
+
+def _render_account_switcher_landing() -> None:
+    """
+    Shown above the login form when there are already accounts
+    remembered in this browser session, so switching back doesn't
+    require re-entering a password.
+    """
+    remembered = auth.get_remembered_accounts()
+    if not remembered:
+        return
+
+    st.write("**Switch to a previously used account:**")
+    for account in remembered:
+        col_label, col_button = st.columns([4, 1])
+        with col_label:
+            st.write(f"{account.display_name} — {account.email}")
+        with col_button:
+            if st.button("Switch", key=f"switch_{account.id}"):
+                success, message = auth.switch_account(account.id)
+                if success:
+                    st.rerun()
+                else:
+                    st.error(message)
+    st.divider()
+
+
 st.title(f"{APP_ICON} {APP_NAME}")
+
+if not auth.is_logged_in():
+    st.write(
+        "Upload one or more photos of a legal document, or a PDF, then ask "
+        "a question by typing or recording your voice. LegalHelp will "
+        "explain it in plain language."
+    )
+    st.write("Log in or create an account to get started — this also lets "
+              "LegalHelp save your past explanations so you can find them "
+              "again later.")
+    _render_account_switcher_landing()
+    _render_login_form()
+    st.stop()
+
+
+# --------------------------------------------------------------------------
+# Sidebar: account info, account switching, and saved history
+# --------------------------------------------------------------------------
+
+current_user = auth.get_current_user()
+
+with st.sidebar:
+    st.subheader("Account")
+    st.write(f"**{current_user.display_name}**")
+    st.caption(current_user.email)
+
+    if st.button("Log out", use_container_width=True):
+        auth.log_out()
+        st.rerun()
+
+    remembered_accounts = [
+        account for account in auth.get_remembered_accounts()
+        if account.id != current_user.id
+    ]
+    if remembered_accounts:
+        st.divider()
+        st.caption("Switch account")
+        for account in remembered_accounts:
+            if st.button(
+                f"{account.display_name} ({account.email})",
+                key=f"sidebar_switch_{account.id}",
+                use_container_width=True,
+            ):
+                success, message = auth.switch_account(account.id)
+                if success:
+                    st.rerun()
+                else:
+                    st.error(message)
+
+    st.divider()
+    with st.expander("Add another account"):
+        _render_login_form()
+
+    st.divider()
+    st.subheader("Saved explanations")
+    st.caption(
+        "Your past questions and explanations are saved to your account "
+        "so you can find them again later."
+    )
+    history_entries = storage.get_history_for_user(
+        current_user.id, limit=MAX_HISTORY_ITEMS_DISPLAYED
+    )
+    if not history_entries:
+        st.caption("No saved explanations yet.")
+    else:
+        for entry in history_entries:
+            with st.expander(f"{entry.created_at[:16].replace('T', ' ')} — {entry.question[:40]}"):
+                st.write(f"**Q:** {entry.question}")
+                st.write(entry.response_text)
+                if st.button("Delete", key=f"delete_history_{entry.id}"):
+                    storage.delete_history_entry(entry.id, current_user.id)
+                    st.rerun()
+        if st.button("Clear all history", use_container_width=True):
+            storage.clear_history_for_user(current_user.id)
+            st.rerun()
+
+
+# --------------------------------------------------------------------------
+# Main app body
+# --------------------------------------------------------------------------
+
 st.write(
     "Upload one or more photos of a legal document, or a PDF, then ask "
     "a question by typing or recording your voice. LegalHelp will "
@@ -128,7 +324,13 @@ if uploaded_images:
 
 # Chat-style composer, pinned to the bottom of the viewport via
 # Streamlit's native bottom container (st.bottom, 1.38+).
-with st.bottom():
+#
+# NOTE: `st.bottom` is a *property* that returns a container object,
+# not a function -- it must be used as `with st.bottom:`, NOT
+# `with st.bottom():`. Calling it (`st.bottom()`) raises
+# `TypeError: 'BottomContainerProxy' object is not callable`, which is
+# the bug this revision fixes.
+with st.bottom:
     input_col, button_col = st.columns([5, 1], vertical_alignment="bottom")
     with input_col:
         typed_question = st.text_input(
@@ -261,6 +463,28 @@ if analyze_clicked:
                         st.success("Here's what LegalHelp found:")
                         st.write(result.response_text)
                         st.audio(result.audio_bytes, format="audio/mp3")
+
+                        # Persist this Q&A to the logged-in account's
+                        # history ("persistent memory"). Only the text
+                        # exchange is stored -- uploaded page images and
+                        # generated audio remain in-memory only, per the
+                        # app's existing privacy design.
+                        try:
+                            storage.save_history_entry(
+                                user_id=current_user.id,
+                                question=(
+                                    typed_question
+                                    if typed_question
+                                    else "(spoken question)"
+                                ),
+                                response_text=result.response_text,
+                                language_code=result.language_code,
+                            )
+                        except Exception:  # noqa: BLE001
+                            logger.exception(
+                                "Failed to save analysis to history; "
+                                "continuing without blocking the response."
+                            )
 
                         # Let users save the explanation for their own
                         # records, either as plain text or as a PDF.

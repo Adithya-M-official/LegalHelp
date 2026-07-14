@@ -1,6 +1,6 @@
 streamlit>=1.38
-google-genai>=0.3
-gTTS>=2.5
-Pillow>=10.0
-fpdf2>=2.7
-PyMuPDF>=1.24
+google-genai
+gTTS
+Pillow
+fpdf2
+PyMuPDF

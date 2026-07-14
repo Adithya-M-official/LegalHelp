@@ -102,6 +102,32 @@ MAX_PAGES = 10
 ALLOW_ANALYSIS_WITH_QUALITY_WARNINGS = True
 
 # --------------------------------------------------------------------------
+# Accounts, authentication, and persistence
+# --------------------------------------------------------------------------
+
+# SQLite database file used for accounts and per-account analysis
+# history. Created automatically on first run. Kept out of source
+# control (see .gitignore) since it holds account data.
+DATABASE_PATH = "data/legalhelp.db"
+
+# PBKDF2-HMAC-SHA256 iteration count for password hashing. 600,000 is
+# in line with current (2024+) OWASP guidance for PBKDF2-SHA256.
+PBKDF2_ITERATIONS = 600_000
+
+MIN_PASSWORD_LENGTH = 8
+
+# How long an account-confirmation code remains valid before the user
+# needs to request a new one.
+CONFIRMATION_TOKEN_TTL_MINUTES = 30
+
+# How many distinct accounts can be "remembered" (switchable without
+# re-entering a password) within a single browser session at once.
+MAX_REMEMBERED_ACCOUNTS = 5
+
+# How many saved analyses to show per account in the history panel.
+MAX_HISTORY_ITEMS_DISPLAYED = 50
+
+# --------------------------------------------------------------------------
 # Logging
 # --------------------------------------------------------------------------
 
