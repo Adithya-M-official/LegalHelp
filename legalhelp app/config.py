@@ -21,7 +21,7 @@ APP_ICON = "⚖️"
 
 # Change this single variable to swap Gemini models. Update it to whatever
 # the current stable Gemini model is at the time you run this project.
-MODEL_NAME = "gemini-2.5-flash"
+MODEL_NAME = "gemini-3.5-flash"
 
 # Network calls to Gemini are retried this many times (with a short backoff)
 # before the app gives up and shows the user an error. This helps ride out
