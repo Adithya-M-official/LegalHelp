@@ -53,7 +53,17 @@ logger = logging.getLogger(__name__)
 # Page setup
 # --------------------------------------------------------------------------
 
-st.set_page_config(page_title=APP_NAME, page_icon=APP_ICON)
+st.set_page_config(page_title=APP_NAME, page_icon=APP_ICON, layout="centered")
+
+# Minor spacing tweak to pair with the sticky bottom composer below.
+st.markdown(
+    """
+    <style>
+    .block-container { padding-bottom: 2rem; }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 
 st.title(f"{APP_ICON} {APP_NAME}")
 st.write(
@@ -116,16 +126,22 @@ if uploaded_images:
                     use_container_width=True,
                 )
 
-typed_question = st.text_input(
-    "Type your question (optional)",
-    max_chars=MAX_QUESTION_LENGTH,
-)
-
-st.write("— or —")
-
-recorded_audio = st.audio_input("Record your question instead")
-
-analyze_clicked = st.button("Analyze", type="primary")
+# Chat-style composer, pinned to the bottom of the viewport via
+# Streamlit's native bottom container (st.bottom, 1.38+).
+with st.bottom():
+    input_col, button_col = st.columns([5, 1], vertical_alignment="bottom")
+    with input_col:
+        typed_question = st.text_input(
+            "Type your question (optional)",
+            max_chars=MAX_QUESTION_LENGTH,
+            placeholder="Ask about your document...",
+            label_visibility="collapsed",
+        )
+    with button_col:
+        analyze_clicked = st.button(
+            "Analyze", type="primary", use_container_width=True
+        )
+    recorded_audio = st.audio_input("Or record your question instead")
 
 
 # --------------------------------------------------------------------------

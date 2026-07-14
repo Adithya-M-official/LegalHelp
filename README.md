@@ -29,7 +29,7 @@ Legal documents are often dense, jargon-heavy, and inaccessible to people withou
 
 LegalHelp follows a simple, layered separation of concerns:
 
-1. **UI layer (`app.py`)** collects one or more page images and/or a PDF and a question from the user via Streamlit, sets up application-wide logging, and renders quality warnings and results.
+1. **UI layer (`app.py`)** collects one or more page images and/or a PDF via a top-of-page uploader, and a question via a chat-style composer pinned to the bottom of the screen, sets up application-wide logging, and renders quality warnings and results in between.
 2. **PDF handling (`pdf_input.py`)** detects PDF uploads and rasterizes each page in memory into a PNG image, so a PDF re-enters the exact same per-page pipeline as a directly-uploaded photo.
 3. **Page validation (`document_pages.py`)** expands any PDFs into their rasterized pages, then validates each resulting page (size, format) and runs it through the image quality checks.
 4. **Image quality checks (`image_quality.py`)** screen each page for blur, glare, low resolution, and poor lighting using lightweight Pillow-based heuristics — no extra image-processing dependency required.
@@ -109,10 +109,10 @@ streamlit run app.py
 
 Then, in the browser window that opens:
 
-1. Upload one or more photos of a legal document (PNG/JPG/JPEG), or a PDF, or a mix of both. For multi-page documents, upload all pages at once, in reading order (up to 10 pages) — a single multi-page PDF works too.
-2. Ask a question — either type it into the text box, or record it using the audio input (if both are provided, the typed question takes priority).
-3. Click **Analyze**. PDF pages are extracted automatically. If any page has a quality issue (blur, glare, low resolution, poor lighting), you'll see a warning before the explanation is generated.
-4. Read the plain-language explanation and/or listen to the generated audio response.
+1. Upload one or more photos of a legal document (PNG/JPG/JPEG), or a PDF, or a mix of both, using the uploader near the top of the page. For multi-page documents, upload all pages at once, in reading order (up to 10 pages) — a single multi-page PDF works too.
+2. Ask a question using the chat-style composer pinned to the bottom of the screen — either type it into the input box, or record it using the audio option beneath it (if both are provided, the typed question takes priority).
+3. Click **Analyze**, next to the question box. PDF pages are extracted automatically. If any page has a quality issue (blur, glare, low resolution, poor lighting), you'll see a warning before the explanation is generated.
+4. Read the plain-language explanation and/or listen to the generated audio response, both displayed above the composer.
 5. Optionally download the explanation as a text file or a PDF.
 
 ## Project Structure
