@@ -115,6 +115,67 @@ st.markdown(
 )
 
 
+_SESSION_KEY_VIEWED_HISTORY_ID = "lh_viewed_history_id"
+_SESSION_KEY_ACTIVE_EXCHANGE = "lh_active_exchange"
+
+
+def _save_current_exchange_to_session(
+    question: str, response_text: str, language_code: str
+) -> None:
+    """
+    Stash the most recent question/answer pair in session state so it
+    survives reruns (e.g. when the user later clicks into a saved
+    history entry and then wants to come back to what they were just
+    looking at).
+    """
+    st.session_state[_SESSION_KEY_ACTIVE_EXCHANGE] = {
+        "question": question,
+        "response_text": response_text,
+        "language_code": language_code,
+    }
+
+
+def _open_history_entry(entry: "storage.HistoryEntry") -> None:
+    """
+    Switch the main view to a previously saved history entry.
+
+    The chat currently on screen (if any, and if not itself already a
+    saved entry) is preserved in session state first -- via
+    `_save_current_exchange_to_session`, called by the analyze flow --
+    so navigating into history is non-destructive and the user can
+    return to it later in the same session.
+    """
+    st.session_state[_SESSION_KEY_VIEWED_HISTORY_ID] = entry.id
+
+
+def _return_to_current_chat() -> None:
+    """Clear history-viewing mode, returning to the live/current chat."""
+    st.session_state[_SESSION_KEY_VIEWED_HISTORY_ID] = None
+
+
+def _get_viewed_history_entry(
+    current_user_id: int,
+) -> Optional["storage.HistoryEntry"]:
+    """
+    If the user has navigated into a saved history entry via the
+    sidebar, fetch and return it (re-fetched fresh, not cached) so it
+    can be rendered in place of the live chat view.
+    """
+    entry_id = st.session_state.get(_SESSION_KEY_VIEWED_HISTORY_ID)
+    if not entry_id:
+        return None
+
+    for entry in storage.get_history_for_user(
+        current_user_id, limit=MAX_HISTORY_ITEMS_DISPLAYED
+    ):
+        if entry.id == entry_id:
+            return entry
+
+    # Entry was deleted/cleared since being opened -- fall back silently.
+    st.session_state[_SESSION_KEY_VIEWED_HISTORY_ID] = None
+    return None
+
+
 def _render_chat_bubble(text: str, *, is_user: bool) -> None:
     """
     Render a single chat-style bubble.
@@ -315,21 +376,104 @@ with st.sidebar:
     if not history_entries:
         st.caption("No saved explanations yet.")
     else:
+        _currently_viewed_id = st.session_state.get(_SESSION_KEY_VIEWED_HISTORY_ID)
+
+        if _currently_viewed_id:
+            st.caption("📂 Viewing a saved explanation.")
+            if st.button(
+                "⬅ Back to current chat", use_container_width=True,
+                key="back_to_current_chat",
+            ):
+                _return_to_current_chat()
+                st.rerun()
+            st.divider()
+
         for entry in history_entries:
-            with st.expander(f"{entry.created_at[:16].replace('T', ' ')} — {entry.question[:40]}"):
-                st.write(f"**Q:** {entry.question}")
-                st.write(entry.response_text)
-                if st.button("Delete", key=f"delete_history_{entry.id}"):
-                    storage.delete_history_entry(entry.id, current_user.id)
+            is_open_entry = entry.id == _currently_viewed_id
+            label = f"{entry.created_at[:16].replace('T', ' ')} — {entry.question[:40]}"
+            row_label_col, row_open_col = st.columns([4, 1])
+            with row_label_col:
+                st.write(("👉 " if is_open_entry else "") + label)
+            with row_open_col:
+                if st.button(
+                    "Open", key=f"open_history_{entry.id}",
+                    disabled=is_open_entry, use_container_width=True,
+                ):
+                    # Preserve whatever's currently live in the main
+                    # view before navigating away from it, so it isn't
+                    # lost when the user comes back.
+                    if not _currently_viewed_id and st.session_state.get(
+                        _SESSION_KEY_ACTIVE_EXCHANGE
+                    ):
+                        pass  # already saved as it was produced
+                    _open_history_entry(entry)
                     st.rerun()
+            if st.button("Delete", key=f"delete_history_{entry.id}"):
+                storage.delete_history_entry(entry.id, current_user.id)
+                if is_open_entry:
+                    _return_to_current_chat()
+                st.rerun()
         if st.button("Clear all history", use_container_width=True):
             storage.clear_history_for_user(current_user.id)
+            _return_to_current_chat()
             st.rerun()
 
 
 # --------------------------------------------------------------------------
 # Main app body
 # --------------------------------------------------------------------------
+
+_viewed_entry = _get_viewed_history_entry(current_user.id)
+
+if _viewed_entry is not None:
+    # Read-only view of a saved explanation, opened from the sidebar.
+    # The live chat/composer is skipped entirely here; "Back to current
+    # chat" in the sidebar returns to it, and nothing about this saved
+    # entry is mutated by viewing it.
+    st.caption(
+        f"Saved explanation from "
+        f"{_viewed_entry.created_at[:16].replace('T', ' ')}"
+    )
+    _render_chat_bubble(_viewed_entry.question, is_user=True)
+    _render_chat_bubble(_viewed_entry.response_text, is_user=False)
+
+    download_col1, download_col2 = st.columns(2)
+    with download_col1:
+        st.download_button(
+            label="Download as text",
+            data=_viewed_entry.response_text,
+            file_name="legalhelp_explanation.txt",
+            mime="text/plain",
+            key="history_download_text",
+        )
+    with download_col2:
+        try:
+            pdf_buffer = build_explanation_pdf(
+                response_text=_viewed_entry.response_text,
+                language_code=_viewed_entry.language_code,
+                app_name=APP_NAME,
+            )
+            st.download_button(
+                label="Download as PDF",
+                data=pdf_buffer,
+                file_name="legalhelp_explanation.pdf",
+                mime="application/pdf",
+                key="history_download_pdf",
+            )
+        except RuntimeError as pdf_error:
+            logger.warning("PDF export unavailable: %s", pdf_error)
+            st.caption(
+                "PDF export isn't available right now, but you can still "
+                "download the text version above."
+            )
+    st.stop()
+
+_active_exchange = st.session_state.get(_SESSION_KEY_ACTIVE_EXCHANGE)
+if _active_exchange:
+    st.caption("Continuing your current chat.")
+    _render_chat_bubble(_active_exchange["question"], is_user=True)
+    _render_chat_bubble(_active_exchange["response_text"], is_user=False)
+    st.divider()
 
 st.write(
     "Upload one or more photos of a legal document, or a PDF, then ask "
@@ -547,14 +691,13 @@ if analyze_clicked:
                         # exchange is stored -- uploaded page images and
                         # generated audio remain in-memory only, per the
                         # app's existing privacy design.
+                        _question_for_history = (
+                            typed_question if typed_question else "(spoken question)"
+                        )
                         try:
                             storage.save_history_entry(
                                 user_id=current_user.id,
-                                question=(
-                                    typed_question
-                                    if typed_question
-                                    else "(spoken question)"
-                                ),
+                                question=_question_for_history,
                                 response_text=result.response_text,
                                 language_code=result.language_code,
                             )
@@ -563,6 +706,16 @@ if analyze_clicked:
                                 "Failed to save analysis to history; "
                                 "continuing without blocking the response."
                             )
+
+                        # Keep this exchange available in session state
+                        # too, so if the user later opens an older saved
+                        # entry from the sidebar, this one isn't lost --
+                        # they can navigate straight back to it.
+                        _save_current_exchange_to_session(
+                            question=_question_for_history,
+                            response_text=result.response_text,
+                            language_code=result.language_code,
+                        )
 
                         # Let users save the explanation for their own
                         # records, either as plain text or as a PDF.

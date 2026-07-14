@@ -239,6 +239,53 @@ def _parse_gemini_response(raw_text: str) -> tuple[str, str]:
 # Text-to-speech
 # --------------------------------------------------------------------------
 
+# Matches Markdown formatting marks that gTTS would otherwise read aloud
+# literally (e.g. saying "asterisk asterisk" for bold text, or "dash" for
+# list bullets). This is intentionally limited to punctuation/markup
+# symbols -- not word characters -- so it's script-agnostic and safe to
+# run on any language Gemini might reply in (Latin, CJK, Arabic, Devanagari,
+# etc.) without stripping or mangling actual spoken letters/diacritics.
+_MARKDOWN_MARKUP_PATTERN = re.compile(
+    r"""
+    \*\*|\*|__|_|          # bold / italic markers (**, *, __, _)
+    ~~|                    # strikethrough
+    `{1,3}|                # inline code / fences
+    \#{1,6}\s*|            # heading markers
+    ^\s*[-*+]\s+|          # leading list bullets
+    ^\s*>\s+                # blockquote markers
+    """,
+    re.VERBOSE | re.MULTILINE,
+)
+
+
+def _clean_text_for_speech(text: str) -> str:
+    """
+    Strip Markdown/formatting characters from `text` before it is sent
+    to gTTS, so the spoken audio only voices the actual words -- not
+    literal symbol names like "asterisk" or "hash" for bullets/headings.
+
+    This only targets ASCII markup punctuation (*, _, #, `, -, >, etc.),
+    never letters, numbers, or diacritics, so text in any language or
+    script (translated, transliterated, or otherwise) is left intact
+    for gTTS to pronounce normally.
+
+    Args:
+        text: The raw explanation text (as shown in the UI, which may
+            contain Markdown emphasis/headings/bullets).
+
+    Returns:
+        str: The same text with Markdown markup characters removed and
+        whitespace normalized, safe to pass to gTTS.
+    """
+    cleaned = _MARKDOWN_MARKUP_PATTERN.sub("", text)
+
+    # Collapse any run of blank lines/spaces left behind by removed
+    # markup so gTTS doesn't insert long, unnatural pauses.
+    cleaned = re.sub(r"[ \t]+", " ", cleaned)
+    cleaned = re.sub(r"\n{2,}", "\n", cleaned)
+    return cleaned.strip()
+
+
 def _resolve_tts_language(language_code: str) -> str:
     """
     Map a Gemini-provided language code to one gTTS will accept.
@@ -280,9 +327,10 @@ def _text_to_speech(text: str, language_code: str) -> BytesIO:
         BytesIO: An in-memory MP3 audio stream, positioned at the start.
     """
     resolved_language = _resolve_tts_language(language_code)
+    speech_text = _clean_text_for_speech(text)
 
     try:
-        tts = gTTS(text=text, lang=resolved_language)
+        tts = gTTS(text=speech_text, lang=resolved_language)
     except ValueError:
         # Belt-and-braces: even after alias/support-set resolution,
         # gTTS didn't recognize the code -- fall back to the default
@@ -294,7 +342,7 @@ def _text_to_speech(text: str, language_code: str) -> BytesIO:
             language_code,
             DEFAULT_TTS_LANGUAGE,
         )
-        tts = gTTS(text=text, lang=DEFAULT_TTS_LANGUAGE)
+        tts = gTTS(text=speech_text, lang=DEFAULT_TTS_LANGUAGE)
 
     audio_buffer = BytesIO()
     tts.write_to_fp(audio_buffer)
