@@ -80,9 +80,25 @@ class HistoryEntry:
 
 def _connect() -> sqlite3.Connection:
     Path(DATABASE_PATH).parent.mkdir(parents=True, exist_ok=True)
-    connection = sqlite3.connect(DATABASE_PATH, check_same_thread=False)
+    # `timeout` bounds how long sqlite3 itself will block waiting on a
+    # file lock held by another connection, in seconds. Without this,
+    # a stuck/overlapping connection (e.g. from an interrupted rerun
+    # on a managed host with unusual filesystem locking behavior) can
+    # hang the whole app indefinitely with no error and no traceback --
+    # exactly the "infinite spinner" failure mode this guards against.
+    connection = sqlite3.connect(
+        DATABASE_PATH, check_same_thread=False, timeout=10
+    )
     connection.row_factory = sqlite3.Row
     connection.execute("PRAGMA foreign_keys = ON;")
+    # WAL (Write-Ahead Logging) mode lets readers and writers avoid
+    # blocking each other in the common case, which matters here since
+    # Streamlit can run multiple overlapping script executions (reruns,
+    # concurrent sessions) against the same database file.
+    connection.execute("PRAGMA journal_mode = WAL;")
+    # Belt-and-braces alongside the connect() timeout above: this sets
+    # SQLite's internal busy-retry window as well.
+    connection.execute("PRAGMA busy_timeout = 10000;")
     return connection
 
 
@@ -101,13 +117,28 @@ def _db():
             connection.close()
 
 
+# Streamlit re-executes the whole script on every rerun (button click,
+# widget interaction, etc.), so app.py's top-level `storage.init_db()`
+# call fires far more often than "once per process start". The SQL
+# itself (CREATE TABLE IF NOT EXISTS) is idempotent and safe to repeat,
+# but repeating it doesn't need to acquire the DB lock and open a new
+# connection every single rerun -- this flag skips that unnecessary
+# work (and lock contention) after the first successful call in this
+# process.
+_SCHEMA_READY = False
+
+
 def init_db() -> None:
     """
     Create the database schema if it doesn't already exist.
 
-    Safe to call on every app startup -- CREATE TABLE IF NOT EXISTS is
-    idempotent.
+    Safe to call on every app startup or rerun -- CREATE TABLE IF NOT
+    EXISTS is idempotent -- but only does real work once per process.
     """
+    global _SCHEMA_READY
+    if _SCHEMA_READY:
+        return
+
     with _db() as connection:
         connection.execute(
             """
@@ -146,6 +177,7 @@ def init_db() -> None:
             );
             """
         )
+    _SCHEMA_READY = True
     logger.info("Database schema ready at %s", DATABASE_PATH)
 
 
