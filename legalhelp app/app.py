@@ -63,15 +63,84 @@ storage.init_db()
 
 st.set_page_config(page_title=APP_NAME, page_icon=APP_ICON, layout="centered")
 
-# Minor spacing tweak to pair with the sticky bottom composer below.
+# Minor spacing tweak to pair with the sticky bottom composer below, plus
+# styling for the chat-bubble presentation of the question/answer pair
+# shown after an analysis runs.
 st.markdown(
     """
     <style>
     .block-container { padding-bottom: 2rem; }
+
+    .lh-chat-row {
+        display: flex;
+        width: 100%;
+        margin: 6px 0;
+    }
+    .lh-chat-row.lh-user { justify-content: flex-end; }
+    .lh-chat-row.lh-ai { justify-content: flex-start; }
+
+    .lh-bubble {
+        max-width: 75%;
+        padding: 10px 14px;
+        border-radius: 16px;
+        line-height: 1.45;
+        font-size: 0.95rem;
+        white-space: pre-wrap;
+        word-wrap: break-word;
+        box-shadow: 0 1px 2px rgba(0,0,0,0.08);
+    }
+    .lh-bubble-user {
+        background-color: #2563eb;
+        color: #ffffff;
+        border-bottom-right-radius: 4px;
+    }
+    .lh-bubble-ai {
+        background-color: #f1f3f5;
+        color: #111111;
+        border: 1px solid #e2e4e8;
+        border-bottom-left-radius: 4px;
+    }
+    .lh-bubble-label {
+        display: block;
+        font-size: 0.72rem;
+        font-weight: 600;
+        opacity: 0.7;
+        margin-bottom: 4px;
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
+    }
     </style>
     """,
     unsafe_allow_html=True,
 )
+
+
+def _render_chat_bubble(text: str, *, is_user: bool) -> None:
+    """
+    Render a single chat-style bubble.
+
+    User messages are right-aligned (blue); AI responses are
+    left-aligned (light gray) and rendered underneath. HTML is escaped
+    to avoid breaking layout or injecting markup from document text.
+    """
+    import html as _html
+
+    row_class = "lh-user" if is_user else "lh-ai"
+    bubble_class = "lh-bubble-user" if is_user else "lh-bubble-ai"
+    label = "You" if is_user else APP_NAME
+    safe_text = _html.escape(text)
+
+    st.markdown(
+        f"""
+        <div class="lh-chat-row {row_class}">
+            <div class="lh-bubble {bubble_class}">
+                <span class="lh-bubble-label">{label}</span>
+                {safe_text}
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 # --------------------------------------------------------------------------
@@ -395,6 +464,13 @@ if analyze_clicked:
     if basic_error:
         st.error(basic_error)
     else:
+        # Show the user's question as a right-aligned chat bubble
+        # immediately, before the (potentially slow) analysis runs, so
+        # there's instant feedback that the request was received.
+        _render_chat_bubble(
+            typed_question if typed_question else "\U0001F3A4 (spoken question)",
+            is_user=True,
+        )
         pages_to_check = uploaded_images[:MAX_PAGES]
         page_results = validate_pages(
             uploaded_files=pages_to_check,
@@ -460,8 +536,10 @@ if analyze_clicked:
                                 ),
                             )
 
-                        st.success("Here's what LegalHelp found:")
-                        st.write(result.response_text)
+                        # AI response rendered as a left-aligned chat
+                        # bubble directly beneath the user's question
+                        # bubble shown above.
+                        _render_chat_bubble(result.response_text, is_user=False)
                         st.audio(result.audio_bytes, format="audio/mp3")
 
                         # Persist this Q&A to the logged-in account's
